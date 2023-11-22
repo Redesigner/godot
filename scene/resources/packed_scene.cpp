@@ -232,6 +232,14 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				}
 #endif
 			}
+		} else if (n.internal && parent) {
+			// The node has been created by a script, so it shouldn't be created here either
+			node = parent->_get_child_by_name(snames[n.name]);
+#ifdef DEBUG_ENABLED
+			if (!node) {
+				WARN_PRINT(String("Node '" + String(ret_nodes[0]->get_path_to(parent)) + "/" + String(snames[n.name]) + "' was marked internal, but it has vanished.").ascii().get_data());
+			}
+#endif
 		} else {
 			//node belongs to this scene and must be created
 			Object *obj = ClassDB::instantiate(snames[n.type]);
@@ -326,30 +334,28 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						if (value.get_type() == Variant::OBJECT) {
 							//handle resources that are local to scene by duplicating them if needed
 							Ref<Resource> res = value;
-							if (res.is_valid()) {
-								if (res->is_local_to_scene()) {
-									if (n.instance >= 0) { // For the root node of a sub-scene, treat it as part of the sub-scene.
-										value = get_remap_resource(res, resources_local_to_sub_scene, node->get(snames[nprops[j].name]), node);
+							if (res.is_valid() && res->is_local_to_scene()) {
+								if (n.instance >= 0) { // For the root node of a sub-scene, treat it as part of the sub-scene.
+									value = get_remap_resource(res, resources_local_to_sub_scene, node->get(snames[nprops[j].name]), node);
+								} else {
+									HashMap<Ref<Resource>, Ref<Resource>>::Iterator E = resources_local_to_scene.find(res);
+									Node *base = i == 0 ? node : ret_nodes[0];
+									if (E) {
+										value = E->value;
 									} else {
-										HashMap<Ref<Resource>, Ref<Resource>>::Iterator E = resources_local_to_scene.find(res);
-										Node *base = i == 0 ? node : ret_nodes[0];
-										if (E) {
-											value = E->value;
+										if (p_edit_state == GEN_EDIT_STATE_MAIN) {
+											//for the main scene, use the resource as is
+											res->configure_for_local_scene(base, resources_local_to_scene);
+											resources_local_to_scene[res] = res;
 										} else {
-											if (p_edit_state == GEN_EDIT_STATE_MAIN) {
-												//for the main scene, use the resource as is
-												res->configure_for_local_scene(base, resources_local_to_scene);
-												resources_local_to_scene[res] = res;
-											} else {
-												//for instances, a copy must be made
-												Ref<Resource> local_dupe = res->duplicate_for_local_scene(base, resources_local_to_scene);
-												resources_local_to_scene[res] = local_dupe;
-												value = local_dupe;
-											}
+											//for instances, a copy must be made
+											Ref<Resource> local_dupe = res->duplicate_for_local_scene(base, resources_local_to_scene);
+											resources_local_to_scene[res] = local_dupe;
+											value = local_dupe;
 										}
 									}
-									//must make a copy, because this res is local to scene
 								}
+								//must make a copy, because this res is local to scene
 							}
 						}
 						if (value.get_type() == Variant::ARRAY) {
@@ -400,8 +406,8 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				node->add_to_group(snames[n.groups[j]], true);
 			}
 
-			if (n.instance >= 0 || n.type != TYPE_INSTANTIATED || i == 0) {
-				//if node was not part of instance, must set its name, parenthood and ownership
+			if ((n.instance >= 0 || n.type != TYPE_INSTANTIATED || i == 0) && !n.internal) {
+				//if node was not part of instance or marked internal, must set its name, parenthood and ownership
 				if (i > 0) {
 					if (parent) {
 						bool pending_add = true;
@@ -614,6 +620,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 
 	nd.name = _nm_get_string(p_node->get_name(), name_map);
 	nd.instance = -1; //not instantiated by default
+	nd.internal = p_node->data.internal_mode != Node::INTERNAL_MODE_DISABLED;
 
 	//really convoluted condition, but it basically checks that index is only saved when part of an inherited scene OR the node parent is from the edited scene
 	if (p_owner->get_scene_inherited_state().is_null() && (p_node == p_owner || (p_node->get_owner() == p_owner && (p_node->get_parent() == p_owner || p_node->get_parent()->get_owner() == p_owner)))) {
@@ -1546,6 +1553,11 @@ int SceneState::get_node_index(int p_idx) const {
 	return nodes[p_idx].index;
 }
 
+bool SceneState::get_node_internal(int p_idx) const {
+	ERR_FAIL_INDEX_V(p_idx, nodes.size(), -1);
+	return nodes[p_idx].internal;
+}
+
 bool SceneState::is_node_instance_placeholder(int p_idx) const {
 	ERR_FAIL_INDEX_V(p_idx, nodes.size(), false);
 
@@ -1788,16 +1800,17 @@ int SceneState::add_node_path(const NodePath &p_path) {
 	return (node_paths.size() - 1) | FLAG_ID_IS_PATH;
 }
 
-int SceneState::add_node(int p_parent, int p_owner, int p_type, int p_name, int p_instance, int p_index) {
-	NodeData nd;
-	nd.parent = p_parent;
-	nd.owner = p_owner;
-	nd.type = p_type;
-	nd.name = p_name;
-	nd.instance = p_instance;
-	nd.index = p_index;
+int SceneState::add_node(int p_parent, int p_owner, int p_type, int p_name, int p_instance, int p_index, bool p_internal) {
+	NodeData node_data;
+	node_data.parent = p_parent;
+	node_data.owner = p_owner;
+	node_data.type = p_type;
+	node_data.name = p_name;
+	node_data.instance = p_instance;
+	node_data.index = p_index;
+	node_data.internal = p_internal;
 
-	nodes.push_back(nd);
+	nodes.push_back(node_data);
 
 	return nodes.size() - 1;
 }

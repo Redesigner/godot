@@ -59,6 +59,7 @@ class SceneState : public RefCounted {
 		int name = 0;
 		int instance = 0;
 		int index = 0;
+		bool internal = false;
 
 		struct Property {
 			int name = 0;
@@ -173,6 +174,7 @@ public:
 	bool is_node_instance_placeholder(int p_idx) const;
 	Vector<StringName> get_node_groups(int p_idx) const;
 	int get_node_index(int p_idx) const;
+	bool get_node_internal(int p_idx) const;
 
 	int get_node_property_count(int p_idx) const;
 	StringName get_node_property_name(int p_idx, int p_prop) const;
@@ -197,7 +199,7 @@ public:
 	int add_name(const StringName &p_name);
 	int add_value(const Variant &p_value);
 	int add_node_path(const NodePath &p_path);
-	int add_node(int p_parent, int p_owner, int p_type, int p_name, int p_instance, int p_index);
+	int add_node(int p_parent, int p_owner, int p_type, int p_name, int p_instance, int p_index, bool p_internal = false);
 	void add_node_property(int p_node, int p_name, int p_value, bool p_deferred_node_path = false);
 	void add_node_group(int p_node, int p_group);
 	void set_base_scene(int p_idx);
